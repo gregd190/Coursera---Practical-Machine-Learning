@@ -1,0 +1,121 @@
+---
+title: "Coursera - Practical Machine Learning - Course Project"
+output: html_notebook
+---
+Overview
+
+This is the final report of the Peer Assessment project from Coursera's course Practical Machine Learning.
+
+The task is to predict the manner in which 6 participants performed some exercise as described below. This is the "classe" variable in the training set.
+
+Background (from project brief)
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+ Data (from project brief)
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+ 
+
+Load Caret Library and Set Seed for reproducability
+```{r}
+library(caret)
+set.seed(100)
+```
+
+
+```{r}
+#Read the training data and replace empty values by NA
+training <- read.csv("pml-training.csv", sep=",", header=TRUE, na.strings = c("NA","",'#DIV/0!'))
+testing <- read.csv("pml-testing.csv", sep=",", header=TRUE, na.strings = c("NA","",'#DIV/0!'))
+dim(training);dim(testing)
+```
+Remove columns containing NAs. If we can't make a good predictor with the remaining columns, we'll review this decision. 
+```{r}
+training <- training[, colSums(is.na(training))==0]
+dim(training)
+
+```
+Delete the X column and timestamp columns, as the they add no meaningful information to the classifier, but allow erroneous methods of classification. 
+```{r}
+training$X <- NULL
+dim(training)
+training <- training[, !grepl('*timestamp*', colnames(training))]
+dim(training)
+```
+
+
+
+
+Preprocess the training data - at this stage just a simple center and scale. We'll review this if a sufficiently good predictor cannot be made. 
+```{r}
+preProcessModel <- preProcess(training, method = c("center", "scale"))
+trainingP <- predict(preProcessModel, training)
+```
+
+Near-zero variance features will slow down our training and add little to our performance. 
+Delete them. 
+```{r}
+nzindex <- nearZeroVar(trainingP, saveMetrics = TRUE)
+trainingP<-trainingP[,nzindex$nzv==FALSE]
+dim(trainingP)
+```
+Split the training set into training and validation sets (80/20 split). There are a sufficient number of datapoints that 20% provides plenty of validation datapoints. 
+```{r}
+inTrain <- createDataPartition(trainingP$classe, p = 0.8)[[1]]
+trainSet <- trainingP[inTrain,]
+valSet <- trainingP[-inTrain,]
+dim(trainSet);dim(valSet)
+```
+
+
+
+Firstly, train an LDA model. This is not expected to provide best performance, but it is computationally fast and will allow us to check that everything is working as expected, and gives us something to compare the performance of other models to. 
+```{r}
+fitLDA <- train(classe ~ ., method = "lda", data = trainSet)
+fitLDA
+```
+Performance is mediocre on training set. Now test on validation set:
+```{r}
+predictLDA <- predict(fitLDA, valSet)
+cmLDA <- confusionMatrix(predictLDA, valSet$classe)
+cmLDA
+```
+
+LDA had an accuracy of about 75%. 
+
+Let's train a Random Forest Model to compare
+
+To reduce processing time, the number of trees is set to 5. If performance is inadequate, we can look at increasing this number. 
+```{r}
+fitControl <- trainControl(method = "cv",
+                           number = 5,
+                           allowParallel = TRUE)
+
+fitRF <- train(classe ~ ., method = "rf", trControl = fitControl, data = trainSet)
+```
+```{r}
+fitRF
+```
+Test performance on validation set:
+```{r}
+predictRF <- predict(fitRF, valSet)
+cmRF <- confusionMatrix(predictRF, valSet$classe)
+cmRF
+```
+Accuracy of 99.75%. This is reasonable performance. We will use this model to predict values from the test file. 
+
+```{r}
+testingP <- predict(preProcessModel, testing)
+predictTesting <- predict(fitRF, testingP)
+predictTesting
+```
+
